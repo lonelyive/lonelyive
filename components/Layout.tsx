@@ -24,19 +24,24 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange, stats
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 text-gray-800 overflow-hidden font-sans">
-      {/* Top Bar */}
-      <header className="flex-none h-14 bg-white shadow-sm flex items-center justify-between px-4 z-10">
-        <div className="flex items-center space-x-2 text-blue-600">
+      {/* Top Bar - Relative container for absolute centering */}
+      <header className="flex-none h-14 bg-white shadow-sm flex items-center justify-between px-4 z-10 relative">
+        {/* Left: Streak */}
+        <div className="flex items-center space-x-2 text-blue-600 z-20">
           <Calendar size={20} />
           <span className="font-bold text-lg">{stats.streakDays} <span className="text-xs font-normal text-gray-500">days</span></span>
         </div>
         
-        <h1 className="text-lg font-bold text-gray-800 tracking-tight">English Master</h1>
+        {/* Center: Title (Absolutely positioned) */}
+        <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <h1 className="text-lg font-black text-gray-800 tracking-tight">单词大师</h1>
+        </div>
 
-        <div className="flex items-center space-x-2 text-amber-500">
+        {/* Right: Points */}
+        <div className="flex items-center space-x-2 text-amber-500 z-20">
           <Award size={20} />
           <span className={`font-bold text-lg ${isMaxScore ? 'animate-pulse text-red-500' : ''}`}>
-            {isMaxScore ? '牛逼' : stats.points}
+            {isMaxScore ? 'MAX' : stats.points}
           </span>
         </div>
       </header>
@@ -60,7 +65,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange, stats
           icon={<BookOpen size={24} />} 
           label="学习" 
         />
-        {/* Dictionary Removed */}
         <NavButton 
           active={activeTab === AppTab.SETTINGS} 
           onClick={() => handleTabClick(AppTab.SETTINGS)} 
@@ -75,7 +79,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange, stats
 const NavButton: React.FC<{ active: boolean; onClick: () => void; icon: React.ReactNode; label: string }> = ({ active, onClick, icon, label }) => (
   <button 
     onClick={onClick}
-    className={`flex flex-col items-center justify-center w-full h-full space-y-1 active:scale-90 transition-transform duration-150 ${active ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+    className={`flex flex-col items-center justify-center w-full h-full space-y-1 active:scale-95 transition-transform duration-150 ${active ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
   >
     <div className={`transition-transform duration-200 ${active ? 'scale-110' : ''}`}>
       {icon}

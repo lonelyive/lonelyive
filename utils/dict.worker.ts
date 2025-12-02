@@ -10,23 +10,38 @@ self.onmessage = async (e: MessageEvent) => {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
     
-    // Direct JSON parsing for standard format
-    const rawData: any[] = await response.json();
+    // 1. 获取文本内容 (不用 .json() 因为文件可能有格式错误)
+    const text = await response.text();
+    let rawData: any[];
 
-    if (!Array.isArray(rawData)) {
-        // Handle single object case
-        if (typeof rawData === 'object' && rawData !== null) {
-            rawData = [rawData];
-        } else {
-            throw new Error("Parsed data is not an array");
-        }
+    // 2. 尝试解析 (带自动修复逻辑)
+    try {
+      rawData = JSON.parse(text);
+    } catch (e) {
+      console.warn(`[Worker] Standard parse failed. Auto-fixing ${category}...`);
+      // 修复: 将 "} {" 替换为 "}, {" 以处理缺失的逗号
+      let fixedText = text.replace(/}\s*[\r\n]*\s*{/g, '},{');
+      // 修复: 如果首尾缺少数组括号
+      const trimmed = fixedText.trim();
+      if (trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+          fixedText = `[${fixedText}]`;
+      }
+      try {
+         rawData = JSON.parse(fixedText);
+      } catch (e2) {
+         throw new Error("JSON parse failed: " + (e2 as Error).message);
+      }
     }
 
-    // Map Data to WordItem format
+    if (!Array.isArray(rawData)) {
+        rawData = [rawData];
+    }
+
+    // 3. 映射数据
     const items: WordItem[] = rawData.map(raw => mapDataToItem(raw, category))
                                     .filter(Boolean) as WordItem[];
 
-    // Batch Insert (Chunks of 2000)
+    // 4. 批量写入 (分块写入避免卡顿)
     const CHUNK_SIZE = 2000;
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
         const chunk = items.slice(i, i + CHUNK_SIZE);
@@ -34,7 +49,7 @@ self.onmessage = async (e: MessageEvent) => {
         self.postMessage({ type: 'progress', count: Math.min(i + CHUNK_SIZE, items.length) });
     }
 
-    // Complete processing
+    // 5. 完成
     await markCategoryLoaded(category);
     self.postMessage({ type: 'complete', count: items.length, success: true });
 
@@ -45,17 +60,31 @@ self.onmessage = async (e: MessageEvent) => {
   }
 };
 
-// Simplified data mapping for standard JSON structure
 const mapDataToItem = (raw: any, category: VocabularyCategory): WordItem | null => {
     if (!raw?.headWord) return null;
 
+    // 兼容多种 JSON 结构
+    let dataRoot = raw;
+    if (raw.content?.word?.content) dataRoot = raw.content.word.content;
+    else if (raw.content && (raw.content.usphone || raw.content.trans)) dataRoot = raw.content;
+
+    // 提取例句
+    let sContent = '', sCn = '';
+    if (Array.isArray(dataRoot.sentences) && dataRoot.sentences.length > 0) {
+        sContent = dataRoot.sentences[0].sContent || '';
+        sCn = dataRoot.sentences[0].sCn || '';
+    } else if (dataRoot.sentence?.sentences?.[0]) {
+        sContent = dataRoot.sentence.sentences[0].sContent || '';
+        sCn = dataRoot.sentence.sentences[0].sCn || '';
+    }
+
     return {
         wordHead: raw.headWord,
-        usphone: raw.usphone || '',
-        sContent: raw.sentences?.[0]?.sContent || '',
-        sCn: raw.sentences?.[0]?.sCn || '',
-        tranCn: raw.tranCn || '暂无翻译',
-        val: raw.remMethod?.val || '',
+        usphone: dataRoot.usphone || '',
+        sContent,
+        sCn,
+        tranCn: Array.isArray(dataRoot.trans) ? dataRoot.trans[0]?.tranCn : (dataRoot.trans?.tranCn || '暂无翻译'),
+        val: dataRoot.remMethod?.val || '',
         category
     };
 };

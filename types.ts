@@ -25,13 +25,13 @@ export interface WordStatus {
   data: WordItem; 
 }
 
-// Ensure absolute paths for public assets
+// CHANGED: Use relative paths ./ to ensure correct resolution in all environments (Web & Android)
 export const CATEGORIES: { id: VocabularyCategory; name: string; file: string }[] = [
-  { id: 'xiaoxue', name: '小学', file: '/merged_xiaoxue.json' },
-  { id: 'chuzhong', name: '初中', file: '/merged_chuzhong.json' },
-  { id: 'gaozhong', name: '高中', file: '/merged_gaozhong.json' },
-  { id: 'CET4', name: 'CET-4', file: '/merged_CET4.json' },
-  { id: 'CET6', name: 'CET-6', file: '/merged_CET6.json' },
+  { id: 'xiaoxue', name: '小学', file: './merged_xiaoxue.json' },
+  { id: 'chuzhong', name: '初中', file: './merged_chuzhong.json' },
+  { id: 'gaozhong', name: '高中', file: './merged_gaozhong.json' },
+  { id: 'CET4', name: 'CET-4', file: './merged_CET4.json' },
+  { id: 'CET6', name: 'CET-6', file: './merged_CET6.json' },
 ];
 
 export enum AppTab {

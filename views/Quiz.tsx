@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { Volume2, CheckCircle, XCircle, ArrowLeft, LayoutGrid, Loader2, ChevronRight, Book, AlertTriangle } from 'lucide-react';
 import { WordItem, VocabularyCategory, CATEGORIES } from '../types';
@@ -23,10 +24,12 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [loadingQuestion, setLoadingQuestion] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [noWordsFound, setNoWordsFound] = useState(false); // New state for empty DB
+  const [noWordsFound, setNoWordsFound] = useState(false); 
   
   const [categoryStats, setCategoryStats] = useState<Record<string, { learned: number, mistake: number }>>({});
 
+  // Reload stats whenever we are in the selection view. 
+  // This ensures that if we deleted a mistake in the other tab, it reflects here immediately upon return.
   useEffect(() => {
       const loadStats = async () => {
           if (!selectedCategory) {
@@ -39,7 +42,7 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
           }
       };
       loadStats();
-  }, [selectedCategory, answered]); 
+  }, [selectedCategory, answered]); // Also reload when an answer changes locally
 
   const generateQuestion = useCallback(async (category: VocabularyCategory) => {
     setLoadingQuestion(true);
@@ -74,7 +77,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
         }
 
         if (!target) {
-            // DB is empty or query failed
             console.warn("No words found for category:", category);
             setNoWordsFound(true);
             setLoadingQuestion(false);
@@ -204,11 +206,18 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
                     <div className="flex flex-col min-w-0">
                         <div className="flex items-center flex-wrap gap-2">
                             <span className="font-bold text-gray-800 text-base">{cat.name}</span>
+                            
                             {isReady ? (
                                 <>
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-600 border border-green-100 whitespace-nowrap">
                                     {stats.learned} 掌握
                                 </span>
+                                {/* Mistake Count Badge - Styled identical to learned badge */}
+                                {stats.mistake > 0 && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-500 border border-red-100 whitespace-nowrap">
+                                        {stats.mistake} 错题
+                                    </span>
+                                )}
                                 </>
                             ) : (
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">

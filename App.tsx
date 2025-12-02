@@ -8,6 +8,7 @@ import Achievements from './views/Achievements';
 import { AppTab, CATEGORIES, UserStats } from './types';
 import { checkInStreak, getUserStats, getVocabularyCount, clearVocabularyByCategory } from './services/db';
 import { fetchAndParseVocabulary } from './utils/loader';
+import { BookMarked, Sparkles } from 'lucide-react';
 
 export interface VocabStatus {
     count: number;
@@ -24,16 +25,26 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        // 1. Load User Data
-        await checkInStreak();
-        const s = await getUserStats();
-        setStats(s);
+        // Start loading vocabularies IMMEDIATELY in the background
+        // We don't await this here because we want the app to open as soon as the splash delay is over.
+        // The vocab loading will continue in the background and update the UI when ready.
+        const vocabLoadTask = autoLoadVocabularies();
+
+        // Load critical user data
+        const userLoadTask = (async () => {
+            await checkInStreak();
+            return await getUserStats();
+        })();
+
+        // Artificial delay for branding splash (1.5 seconds)
+        // This gives the vocab loader a head start of 1.5s
+        const splashDelay = new Promise(resolve => setTimeout(resolve, 1500));
+
+        // Wait for User Data AND Splash Delay (but not necessarily all vocabs)
+        const [userData] = await Promise.all([userLoadTask, splashDelay]);
         
-        // 2. Show UI immediately
+        setStats(userData);
         setLoading(false);
-        
-        // 3. Start Background Load
-        autoLoadVocabularies();
 
       } catch (e) {
           console.error("[App] Init failed", e);
@@ -48,7 +59,7 @@ const App: React.FC = () => {
       const missingCategories = [];
       const initialStatus: Record<string, VocabStatus> = {};
       
-      // Phase 1: Quick DB Check
+      // 1. Check DB status
       for (const cat of CATEGORIES) {
           try {
               const count = await getVocabularyCount(cat.id);
@@ -65,13 +76,16 @@ const App: React.FC = () => {
       }
       setVocabStatus(initialStatus);
 
-      // Phase 2: Download & Parse Missing
+      // 2. Download & Parse Missing Categories Sequentially
+      // Doing this sequentially ensures we don't freeze the UI thread too much
       for (const cat of missingCategories) {
             console.log(`[App] ⬇️ Auto-loading: ${cat.name}`);
             try {
+                // Ensure clean state
                 await clearVocabularyByCategory(cat.id);
+                
                 const success = await fetchAndParseVocabulary(cat.id, cat.file, (progressCount) => {
-                    // Optional: update progress if needed, but we keep UI simple
+                    // Optional: Update progress in a future UI version
                 });
                 
                 if (success) {
@@ -93,16 +107,30 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-blue-600 text-white px-6">
-        <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-sm font-medium">Initializing...</p>
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-blue-600 to-indigo-700 text-white px-6">
+        <div className="relative mb-6">
+            <div className="absolute inset-0 bg-white/20 rounded-full blur-xl animate-pulse-slow"></div>
+            <div className="bg-white p-5 rounded-3xl shadow-xl relative z-10 animate-slide-up">
+                <BookMarked size={64} className="text-blue-600" />
+                <div className="absolute -top-2 -right-2 bg-amber-400 p-1.5 rounded-full border-4 border-blue-600">
+                    <Sparkles size={16} className="text-white" />
+                </div>
+            </div>
+        </div>
+        
+        <h1 className="text-4xl font-black mb-2 tracking-tight animate-fade-in">单词大师</h1>
+        <p className="opacity-80 text-sm tracking-widest uppercase font-medium animate-fade-in" style={{animationDelay: '0.1s'}}>Word Master</p>
+        
+        <div className="mt-12 flex flex-col items-center space-y-3 animate-fade-in" style={{animationDelay: '0.2s'}}>
+            <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+            <p className="text-xs opacity-60">正在准备词库...</p>
+        </div>
       </div>
     );
   }
 
   const renderContent = () => {
     const counts: Record<string, number> = {};
-    // Safe access to vocabStatus
     Object.keys(vocabStatus || {}).forEach(k => counts[k] = vocabStatus[k]?.count || 0);
 
     if (activeTab === AppTab.HOME) {
