@@ -3,7 +3,7 @@ import { WordStatus, UserStats, WordItem, VocabularyCategory } from '../types';
 
 interface VocabDB extends DBSchema {
   progress: {
-    key: string; // wordHead
+    key: string;
     value: WordStatus;
     indexes: { 'by-status': string; 'by-category': string };
   };
@@ -12,7 +12,7 @@ interface VocabDB extends DBSchema {
     value: any;
   };
   vocabulary: {
-    key: number; // Auto-increment ID
+    key: number; 
     value: WordItem;
     indexes: { 'by-category': string; 'by-word': string };
   };
@@ -66,19 +66,22 @@ export const clearVocabularyByCategory = async (category: string) => {
     const db = await getDB();
     const tx = db.transaction('vocabulary', 'readwrite');
     const index = tx.store.index('by-category');
-    // Get all primary keys (IDs) for this category
     const keys = await index.getAllKeys(category);
-    // Delete them all
     await Promise.all(keys.map(key => tx.store.delete(key)));
     await tx.done;
 };
 
+// Optimized Batch Insert using a single transaction for speed
 export const addVocabularyBatch = async (items: WordItem[]) => {
     const db = await getDB();
     const tx = db.transaction('vocabulary', 'readwrite');
-    // Promise.all is faster for batches in idb
-    await Promise.all(items.map(item => tx.store.add(item)));
-    await tx.done;
+    const store = tx.store;
+    
+    // Parallel execution within one transaction
+    await Promise.all([
+        ...items.map(item => store.add(item)),
+        tx.done
+    ]);
 };
 
 export const getVocabularyCount = async (category?: VocabularyCategory): Promise<number> => {
@@ -91,14 +94,15 @@ export const getVocabularyCount = async (category?: VocabularyCategory): Promise
 
 export const getRandomWordsByCategory = async (category: VocabularyCategory, count: number): Promise<WordItem[]> => {
     const db = await getDB();
-    // Getting all keys is lightweight compared to getting all objects
     const keys = await db.getAllKeysFromIndex('vocabulary', 'by-category', category);
     if (keys.length === 0) return [];
 
     const selectedWords: WordItem[] = [];
     const usedIndices = new Set<number>();
 
-    while (selectedWords.length < count && usedIndices.size < keys.length) {
+    let attempts = 0;
+    // Safety limit to prevent infinite loops
+    while (selectedWords.length < count && usedIndices.size < keys.length && attempts < 50) {
         const idx = Math.floor(Math.random() * keys.length);
         if (!usedIndices.has(idx)) {
             usedIndices.add(idx);
@@ -106,61 +110,42 @@ export const getRandomWordsByCategory = async (category: VocabularyCategory, cou
             const word = await db.get('vocabulary', key);
             if (word) selectedWords.push(word);
         }
+        attempts++;
     }
     return selectedWords;
 };
 
 export const getRandomDistractors = async (excludeWord: string, count: number): Promise<string[]> => {
     const db = await getDB();
-    // We limit to a range to avoid scanning the whole huge DB, just pick a random offset
-    // This is an optimization: just grab a chunk of keys
-    const total = await db.count('vocabulary');
-    
-    // Robust approach: Get random items using random keys
     const distractors: string[] = [];
     let attempts = 0;
     
-    // Safety break
-    while(distractors.length < count && attempts < 50) {
-        // Correct implementation for speed:
-        // For distractors specifically:
-        const cat = 'CET4'; // Default pool
-        const poolKeys = await db.getAllKeysFromIndex('vocabulary', 'by-category', cat, 100);
-        
-        if (poolKeys.length > 0) {
-             const k = poolKeys[Math.floor(Math.random() * poolKeys.length)];
-             const item = await db.get('vocabulary', k);
-             if (item && item.tranCn && item.wordHead !== excludeWord && !distractors.includes(item.tranCn)) {
-                distractors.push(item.tranCn);
-             }
-        }
+    // Try to get distractors from CET4 as a generic pool if possible, or any loaded category
+    const cat = 'CET4'; 
+    const poolKeys = await db.getAllKeysFromIndex('vocabulary', 'by-category', cat, 200);
+    
+    // If CET4 is empty, try to grab from the whole store (slower but safer fallback)
+    const effectiveKeys = poolKeys.length > 0 ? poolKeys : await db.getAllKeys('vocabulary', 200);
+
+    while(distractors.length < count && attempts < 50 && effectiveKeys.length > 0) {
+         const k = effectiveKeys[Math.floor(Math.random() * effectiveKeys.length)];
+         const item = await db.get('vocabulary', k);
+         if (item && item.tranCn && item.wordHead !== excludeWord && !distractors.includes(item.tranCn)) {
+            distractors.push(item.tranCn);
+         }
         attempts++;
     }
     
-    // Fallback if still empty (e.g. DB empty)
+    // Fallback if DB is empty
     if (distractors.length < count) {
-        distractors.push("错误选项 A", "错误选项 B", "错误选项 C");
+        const fallbacks = ["错误选项 A", "错误选项 B", "错误选项 C", "错误选项 D", "错误选项 E"];
+        for (const fb of fallbacks) {
+            if (distractors.length < count) distractors.push(fb);
+        }
     }
 
     return distractors.slice(0, count);
 }
-
-export const searchLocalVocabulary = async (query: string, limit: number = 10): Promise<WordItem[]> => {
-    if (!query) return [];
-    const db = await getDB();
-    // IndexedDB doesn't support full-text search natively. 
-    // We use a range bound on the index for "startsWith" logic.
-    // Prefix search: "app" -> range("app", "app" + "\uffff")
-    const range = IDBKeyRange.bound(query, query + '\uffff');
-    let results: WordItem[] = [];
-    
-    try {
-        results = await db.getAllFromIndex('vocabulary', 'by-word', range, limit);
-    } catch (e) {
-        // Fallback
-    }
-    return results;
-};
 
 // --- Stats Operations ---
 
@@ -233,19 +218,11 @@ export const getAchievements = async (): Promise<WordStatus[]> => {
   return db.getAllFromIndex('progress', 'by-status', 'learned');
 };
 
-export const getAllProgress = async (): Promise<WordStatus[]> => {
-    const db = await getDB();
-    return db.getAll('progress');
-};
-
-// Retrieve just the word IDs (wordHead) for a specific category that have ANY progress (learned or mistake)
 export const getProgressIdsByCategory = async (category: VocabularyCategory): Promise<string[]> => {
     const db = await getDB();
-    // Returns array of keys (wordHeads)
     return db.getAllKeysFromIndex('progress', 'by-category', category) as Promise<string[]>;
 };
 
-// Get detailed stats for a category
 export const getCategoryStats = async (category: VocabularyCategory): Promise<{ learned: number, mistake: number }> => {
     const db = await getDB();
     const items = await db.getAllFromIndex('progress', 'by-category', category);
@@ -260,24 +237,18 @@ export const getCategoryStats = async (category: VocabularyCategory): Promise<{ 
 
 export const resetGlobalData = async () => {
   const db = await getDB();
-  
   try {
-      // 1. Clear Mistakes & Achievements
       const tx1 = db.transaction('progress', 'readwrite');
       await tx1.store.clear();
       await tx1.done;
       
-      // 2. Clear User Stats (Points, Streak, Login)
       const tx2 = db.transaction('stats', 'readwrite');
       await tx2.store.clear();
-      
-      // Immediately initialize default values to prevent undefined errors in UI
       await Promise.all([
           tx2.store.put(0, 'points'),
           tx2.store.put('', 'lastLoginDate'),
           tx2.store.put(0, 'streakDays')
       ]);
-      
       await tx2.done;
   } catch (e) {
       console.error("Error during reset:", e);

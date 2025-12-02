@@ -6,98 +6,83 @@ import Settings from './views/Settings';
 import Mistakes from './views/Mistakes';
 import Achievements from './views/Achievements';
 import { AppTab, CATEGORIES, UserStats } from './types';
-import { checkInStreak, getUserStats, isVocabularyLoaded, getVocabularyCount, clearVocabularyByCategory } from './services/db';
+import { checkInStreak, getUserStats, getVocabularyCount, clearVocabularyByCategory } from './services/db';
 import { fetchAndParseVocabulary } from './utils/loader';
 
-// Define the shape of our vocab status
 export interface VocabStatus {
     count: number;
-    loading: boolean;
+    ready: boolean;
 }
 
 const App: React.FC = () => {
-  const [loading, setLoading] = useState(true); // Initial User Stats loading (fast)
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.HOME);
   const [homeView, setHomeView] = useState<'main' | 'mistakes' | 'achievements'>('main');
-  
-  // User State
   const [stats, setStats] = useState<UserStats>({ points: 0, streakDays: 0, lastLoginDate: '' });
-  
-  // Detailed status for each vocabulary category (count + loading state)
   const [vocabStatus, setVocabStatus] = useState<Record<string, VocabStatus>>({});
 
   useEffect(() => {
     const initApp = async () => {
       try {
-        // 1. Fast Load: User Stats & Basic DB
+        // 1. Load User Data
         await checkInStreak();
         const s = await getUserStats();
         setStats(s);
         
-        // Remove Splash Screen immediately so user can interact
+        // 2. Show UI immediately
         setLoading(false);
-
-        // 2. Load Vocabularies
-        loadVocabularies();
+        
+        // 3. Start Background Load
+        autoLoadVocabularies();
 
       } catch (e) {
-          console.error("Failed to load application", e);
-          setLoading(false); // Allow entry even if error, though might be empty
+          console.error("[App] Init failed", e);
+          setLoading(false);
       }
     };
 
     initApp();
   }, []);
 
-  const loadVocabularies = async () => {
-      // Step A: First, check ALL categories in parallel to see what's already on disk.
-      // This ensures the UI shows counts for existing libs immediately, 
-      // without waiting for the first missing lib to parse.
-      const statusUpdates: Record<string, VocabStatus> = {};
+  const autoLoadVocabularies = async () => {
       const missingCategories = [];
-
-      await Promise.all(CATEGORIES.map(async (cat) => {
+      const initialStatus: Record<string, VocabStatus> = {};
+      
+      // Phase 1: Quick DB Check
+      for (const cat of CATEGORIES) {
           try {
-              const isLoaded = await isVocabularyLoaded(cat.id);
-              if (isLoaded) {
-                  const count = await getVocabularyCount(cat.id);
-                  statusUpdates[cat.id] = { count, loading: false };
+              const count = await getVocabularyCount(cat.id);
+              if (count > 10) {
+                  initialStatus[cat.id] = { count, ready: true };
               } else {
-                  // Mark as needing load
-                  statusUpdates[cat.id] = { count: 0, loading: true };
+                  initialStatus[cat.id] = { count: 0, ready: false };
                   missingCategories.push(cat);
               }
           } catch (e) {
-              console.error(`Metadata check failed for ${cat.id}`, e);
+              initialStatus[cat.id] = { count: 0, ready: false };
+              missingCategories.push(cat);
           }
-      }));
+      }
+      setVocabStatus(initialStatus);
 
-      // Batch update state for immediate UI feedback
-      setVocabStatus(prev => ({ ...prev, ...statusUpdates }));
-
-      // Step B: Sequentially process only the missing categories
-      // (Web Workers are parallel, but we queue them to avoid freezing low-end devices with too many concurrent workers)
+      // Phase 2: Download & Parse Missing
       for (const cat of missingCategories) {
+            console.log(`[App] ⬇️ Auto-loading: ${cat.name}`);
             try {
-                // Cleanup potential partial data
                 await clearVocabularyByCategory(cat.id);
-
-                // Stream load with progress updates
-                const success = await fetchAndParseVocabulary(cat.id, cat.file, (currentCount) => {
-                    setVocabStatus(prev => ({ ...prev, [cat.id]: { count: currentCount, loading: true } }));
+                const success = await fetchAndParseVocabulary(cat.id, cat.file, (progressCount) => {
+                    // Optional: update progress if needed, but we keep UI simple
                 });
                 
-                // Finalize
                 if (success) {
                     const finalCount = await getVocabularyCount(cat.id);
-                    setVocabStatus(prev => ({ ...prev, [cat.id]: { count: finalCount, loading: false } }));
+                    console.log(`[App] 🎉 Loaded ${cat.name}: ${finalCount}`);
+                    setVocabStatus(prev => ({ ...prev, [cat.id]: { count: finalCount, ready: true } }));
                 } else {
-                    // Handle error state
-                    setVocabStatus(prev => ({ ...prev, [cat.id]: { count: 0, loading: false } }));
+                    console.error(`[App] ❌ Failed to load ${cat.name}`);
                 }
-            } catch (error) {
-                console.error(`Error processing ${cat.name}`, error);
-                setVocabStatus(prev => ({ ...prev, [cat.id]: { count: 0, loading: false } }));
+            } catch (err) {
+                console.error(`[App] ❌ Error loading ${cat.name}:`, err);
             }
       }
   };
@@ -106,37 +91,29 @@ const App: React.FC = () => {
       setStats(prev => ({ ...prev, points: newPoints }));
   };
 
-  // Only show splash screen for user stats (very fast)
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-blue-600 text-white px-6">
-        <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mb-6"></div>
-        <h1 className="text-3xl font-bold mb-2">English Master</h1>
-        <p className="opacity-90 text-sm">Synchronizing user data...</p>
+        <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-sm font-medium">Initializing...</p>
       </div>
     );
   }
 
-  // Helper to get simple counts for Home/Layout
-  const getSimpleCounts = () => {
-      const counts: Record<string, number> = {};
-      Object.keys(vocabStatus).forEach(k => counts[k] = vocabStatus[k].count);
-      return counts;
-  };
-
   const renderContent = () => {
-    const simpleCounts = getSimpleCounts();
+    const counts: Record<string, number> = {};
+    // Safe access to vocabStatus
+    Object.keys(vocabStatus || {}).forEach(k => counts[k] = vocabStatus[k]?.count || 0);
 
     if (activeTab === AppTab.HOME) {
         if (homeView === 'mistakes') return <Mistakes onBack={() => setHomeView('main')} />;
         if (homeView === 'achievements') return <Achievements onBack={() => setHomeView('main')} />;
         
-        const totalWords = Object.values(simpleCounts).reduce((a, b) => a + b, 0);
-        return <Home totalWords={totalWords} vocabCounts={simpleCounts} onNavigate={setHomeView} />;
+        const totalWords = Object.values(counts).reduce((a, b) => a + b, 0);
+        return <Home totalWords={totalWords} vocabCounts={counts} onNavigate={setHomeView} />;
     }
     if (activeTab === AppTab.LEARN) {
-        // Pass full status object to Quiz so it can show loading bars
-        return <Quiz onPointsUpdate={handlePointsUpdate} vocabCounts={simpleCounts} vocabStatus={vocabStatus} />;
+        return <Quiz onPointsUpdate={handlePointsUpdate} vocabStatus={vocabStatus} />;
     }
     if (activeTab === AppTab.SETTINGS) {
         return <Settings />;

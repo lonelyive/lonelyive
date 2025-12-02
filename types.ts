@@ -1,10 +1,10 @@
 export interface WordItem {
-  wordHead: string; // The word
-  usphone: string; // Phonetic symbol
-  sContent: string; // Example sentence
-  sCn: string; // Example sentence translation
-  tranCn: string; // Word translation
-  val: string; // Association/Mnemonic
+  wordHead: string; 
+  usphone: string; 
+  sContent: string; 
+  sCn: string; 
+  tranCn: string; 
+  val: string; 
   category: VocabularyCategory;
 }
 
@@ -12,7 +12,7 @@ export type VocabularyCategory = 'xiaoxue' | 'chuzhong' | 'gaozhong' | 'CET4' | 
 
 export interface UserStats {
   points: number;
-  lastLoginDate: string; // YYYY-MM-DD
+  lastLoginDate: string; 
   streakDays: number;
 }
 
@@ -22,9 +22,10 @@ export interface WordStatus {
   category: VocabularyCategory;
   status: 'learned' | 'mistake';
   timestamp: number;
-  data: WordItem; // Cache the full item for display in lists
+  data: WordItem; 
 }
 
+// Ensure absolute paths for public assets
 export const CATEGORIES: { id: VocabularyCategory; name: string; file: string }[] = [
   { id: 'xiaoxue', name: '小学', file: '/merged_xiaoxue.json' },
   { id: 'chuzhong', name: '初中', file: '/merged_chuzhong.json' },
@@ -38,4 +39,3 @@ export enum AppTab {
   LEARN = 'learn',
   SETTINGS = 'settings',
 }
-

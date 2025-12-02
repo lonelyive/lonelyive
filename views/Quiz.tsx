@@ -1,6 +1,5 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
-import { Volume2, CheckCircle, XCircle, ArrowLeft, LayoutGrid, Loader2, ChevronRight, GraduationCap, AlertCircle, Download, Book } from 'lucide-react';
+import { Volume2, CheckCircle, XCircle, ArrowLeft, LayoutGrid, Loader2, ChevronRight, Book, AlertTriangle } from 'lucide-react';
 import { WordItem, VocabularyCategory, CATEGORIES } from '../types';
 import { playAudio, cleanText, stopAudio } from '../services/audio';
 import { saveWordProgress, updatePoints, getProgressIdsByCategory, getRandomWordsByCategory, getRandomDistractors, getCategoryStats } from '../services/db';
@@ -9,24 +8,22 @@ import { triggerHaptic } from '../utils/feedback';
 
 interface QuizProps {
   onPointsUpdate: (pts: number) => void;
-  vocabCounts: Record<string, number>;
-  vocabStatus?: Record<string, VocabStatus>;
+  vocabStatus: Record<string, VocabStatus>;
 }
 
-// Shuffle array
 function shuffle<T>(array: T[]): T[] {
   return [...array].sort(() => Math.random() - 0.5);
 }
 
-const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = {} }) => {
+const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
   const [selectedCategory, setSelectedCategory] = useState<VocabularyCategory | null>(null);
   const [currentWord, setCurrentWord] = useState<WordItem | null>(null);
   const [options, setOptions] = useState<string[]>([]);
   const [answered, setAnswered] = useState<'correct' | 'wrong' | null>(null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
-  const [isFinished, setIsFinished] = useState(false);
   const [loadingQuestion, setLoadingQuestion] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [noWordsFound, setNoWordsFound] = useState(false); // New state for empty DB
   
   const [categoryStats, setCategoryStats] = useState<Record<string, { learned: number, mistake: number }>>({});
 
@@ -46,6 +43,7 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
 
   const generateQuestion = useCallback(async (category: VocabularyCategory) => {
     setLoadingQuestion(true);
+    setNoWordsFound(false);
     try {
         const excludedList = await getProgressIdsByCategory(category);
         const excludedIds = new Set(excludedList);
@@ -53,6 +51,7 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
         let target: WordItem | null = null;
         let attempts = 0;
         
+        // 1. Try to find a new (unlearned) word
         while (!target && attempts < 5) {
             const candidates = await getRandomWordsByCategory(category, 5);
             if (candidates.length === 0) break;
@@ -66,15 +65,25 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
             attempts++;
         }
 
+        // 2. If no new words found, Fallback to Review Mode
         if (!target) {
-            setIsFinished(true);
+            const reviewCandidates = await getRandomWordsByCategory(category, 1);
+            if (reviewCandidates.length > 0) {
+                target = reviewCandidates[0];
+            }
+        }
+
+        if (!target) {
+            // DB is empty or query failed
+            console.warn("No words found for category:", category);
+            setNoWordsFound(true);
             setLoadingQuestion(false);
             return;
         }
 
         const distractors = await getRandomDistractors(target.wordHead, 3);
         while(distractors.length < 3) {
-            distractors.push("Wrong Answer " + (distractors.length + 1));
+            distractors.push("Error Option " + (distractors.length + 1));
         }
 
         const allOptions = shuffle([target.tranCn, ...distractors]);
@@ -85,26 +94,24 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
         setSelectedOption(null);
     } catch (e) {
         console.error("Quiz Error", e);
+        setNoWordsFound(true);
     } finally {
         setLoadingQuestion(false);
     }
-
   }, []);
 
   const handleCategorySelect = (cat: VocabularyCategory) => {
-    if (vocabStatus[cat]?.loading) return;
-
-    triggerHaptic(20); // Slightly longer haptic for selection
+    if (!vocabStatus[cat]?.ready) return;
+    triggerHaptic(20);
     stopAudio();
     setSelectedCategory(cat);
-    setIsFinished(false);
     generateQuestion(cat);
   };
 
   const handleAnswer = async (option: string) => {
     if (answered || !currentWord) return;
     
-    triggerHaptic(10); // Click feel
+    triggerHaptic(10);
     setSelectedOption(option);
     const isCorrect = option === currentWord.tranCn;
 
@@ -116,7 +123,7 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
       await saveWordProgress(currentWord, 'learned');
     } else {
       setAnswered('wrong');
-      triggerHaptic(50); // Error vibration is stronger
+      triggerHaptic(50);
       playAudio(currentWord.wordHead);
       await saveWordProgress(currentWord, 'mistake');
     }
@@ -125,14 +132,12 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
   const handleNext = async () => {
       triggerHaptic();
       if (!selectedCategory) return;
-
       if (answered === null && currentWord) {
           setAnswered('wrong'); 
           setSelectedOption(null); 
           await saveWordProgress(currentWord, 'mistake');
           return; 
       }
-
       stopAudio();
       setIsPlayingAudio(false);
       generateQuestion(selectedCategory);
@@ -155,14 +160,14 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
       triggerHaptic();
       stopAudio();
       setSelectedCategory(null);
+      setNoWordsFound(false);
   };
 
   useEffect(() => {
-      return () => {
-          stopAudio();
-      };
+      return () => { stopAudio(); };
   }, []);
 
+  // --- Category Selection View ---
   if (!selectedCategory) {
     return (
       <div className="p-4 h-full overflow-y-auto pb-20">
@@ -172,29 +177,20 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
             </div>
             <h2 className="text-lg font-bold text-gray-800">选择词库 (Select Library)</h2>
         </div>
-        
         <div className="grid gap-3">
           {CATEGORIES.map((cat) => {
             const stats = categoryStats[cat.id] || { learned: 0, mistake: 0 };
-            const status = vocabStatus[cat.id];
-            const isLoading = status?.loading;
-            const count = status?.count || 0;
+            const status = vocabStatus[cat.id] || { count: 0, ready: false };
+            const isReady = status.ready;
 
             return (
             <button
               key={cat.id}
               onClick={() => handleCategorySelect(cat.id)}
-              disabled={isLoading}
+              disabled={!isReady}
               className={`group bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-stretch space-y-3 transition-all text-left relative overflow-hidden
-                ${isLoading ? 'opacity-80 cursor-wait' : 'active:scale-95'}`}
+                ${isReady ? 'active:scale-95' : 'opacity-50 cursor-not-allowed grayscale'}`}
             >
-              {/* Progress Bar Background for Loading */}
-              {isLoading && (
-                  <div className="absolute bottom-0 left-0 h-1 bg-blue-100 w-full">
-                      <div className="h-full bg-blue-500 animate-pulse w-full"></div>
-                  </div>
-              )}
-
               <div className="flex justify-between items-center w-full">
                   <div className="flex items-center space-x-3">
                     <div className={`w-11 h-11 rounded-xl flex-none flex items-center justify-center font-bold text-white shadow-sm text-sm mr-3
@@ -203,43 +199,30 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
                           cat.id === 'gaozhong' ? 'bg-blue-400' :
                           cat.id === 'CET4' ? 'bg-indigo-400' : 'bg-purple-400'
                         }`}>
-                        {isLoading ? <Loader2 size={20} className="animate-spin" /> : cat.name.substring(0, 1)}
+                        {cat.name.substring(0, 1)}
                     </div>
-                    
                     <div className="flex flex-col min-w-0">
-                        {/* Title Line */}
                         <div className="flex items-center flex-wrap gap-2">
                             <span className="font-bold text-gray-800 text-base">{cat.name}</span>
-                            
-                            {!isLoading && (
+                            {isReady ? (
                                 <>
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-600 border border-green-100 whitespace-nowrap">
                                     {stats.learned} 掌握
                                 </span>
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-500 border border-red-100 whitespace-nowrap">
-                                    {stats.mistake} 错题
-                                </span>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Subtitle / Status Line */}
-                        <div className={`text-xs mt-1 truncate flex items-center ${isLoading ? 'text-blue-500 font-medium' : 'text-gray-400'}`}>
-                            {isLoading ? (
-                                <>
-                                    <Download size={12} className="mr-1 animate-bounce" />
-                                    <span>正在加载资源: {count.toLocaleString()}...</span>
                                 </>
                             ) : (
-                                <>
-                                    <Book size={12} className="mr-1 opacity-70" />
-                                    <span>词汇量: {count.toLocaleString()}</span>
-                                </>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">
+                                    准备中...
+                                </span>
                             )}
+                        </div>
+                        <div className="text-xs mt-1 truncate flex items-center text-gray-400">
+                            <Book size={12} className="mr-1 opacity-70" />
+                            <span>{isReady ? `词汇量: ${status.count.toLocaleString()}` : '正在初始化资源...'}</span>
                         </div>
                     </div>
                   </div>
-                  {!isLoading && <ChevronRight size={18} className="text-gray-300 flex-none ml-2" />}
+                  {isReady && <ChevronRight size={18} className="text-gray-300 flex-none ml-2" />}
               </div>
             </button>
           )})}
@@ -248,33 +231,38 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
     );
   }
 
-  if (isFinished) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-        <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mb-4">
-           <span className="text-3xl">🎉</span>
-        </div>
-        <h2 className="text-xl font-bold text-gray-800 mb-2">恭喜通关！</h2>
-        <p className="text-gray-600 mb-6 text-sm">该词库已暂无更多新词</p>
-        <button 
-           onClick={handleBack}
-           className="px-6 py-2 bg-blue-600 text-white rounded-full font-bold shadow-md active:scale-95 transition-transform"
-        >
-          返回
-        </button>
-      </div>
-    );
-  }
-
-  if (loadingQuestion || !currentWord) {
+  // --- Error View (Empty DB) ---
+  if (noWordsFound) {
       return (
-          <div className="flex flex-col items-center justify-center h-full">
-              <Loader2 size={32} className="animate-spin text-blue-500 mb-2" />
-              <p className="text-gray-400 text-sm">Loading...</p>
+          <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+              <div className="bg-amber-100 p-4 rounded-full mb-4">
+                  <AlertTriangle size={48} className="text-amber-500" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-800 mb-2">词库数据为空</h3>
+              <p className="text-gray-500 text-sm mb-6">
+                  未能找到该分类的单词数据。请尝试在设置中重置应用，或检查网络连接后重启。
+              </p>
+              <button 
+                  onClick={handleBack}
+                  className="px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-lg active:scale-95 transition-transform"
+              >
+                  返回 (Back)
+              </button>
           </div>
       );
   }
 
+  // --- Loading View ---
+  if (loadingQuestion || !currentWord) {
+      return (
+          <div className="flex flex-col items-center justify-center h-full">
+              <Loader2 size={32} className="animate-spin text-blue-500 mb-2" />
+              <p className="text-xs text-gray-400">Loading Question...</p>
+          </div>
+      );
+  }
+
+  // --- Quiz Main UI ---
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
        <div className="px-4 py-2 bg-white flex items-center border-b border-gray-100 flex-none z-10 h-12">
@@ -312,7 +300,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabCounts, vocabStatus = 
                             onClick={handlePlaySentence}
                             disabled={isPlayingAudio}
                             className={`text-blue-400 hover:text-blue-600 p-2 flex-shrink-0 bg-blue-50 rounded-full transition-colors ${isPlayingAudio ? 'opacity-50 cursor-not-allowed' : 'active:bg-blue-100 active:scale-90'}`}
-                            aria-label="Play sentence audio"
                         >
                             {isPlayingAudio ? <Loader2 size={20} className="animate-spin" /> : <Volume2 size={20} />}
                         </button>
