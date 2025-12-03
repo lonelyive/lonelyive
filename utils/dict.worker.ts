@@ -1,16 +1,17 @@
+
 import { WordItem, VocabularyCategory } from '../types';
 import { addVocabularyBatch, markCategoryLoaded } from '../services/db';
 
 self.onmessage = async (e: MessageEvent) => {
   const { category, url } = e.data;
   
-  console.log(`[Worker] Loading: ${category} from ${url}`);
+  console.log(`[Worker] Loading: ${category}`);
 
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
     
-    // 1. 获取文本内容 (不用 .json() 因为文件可能有格式错误)
+    // 1. 获取文本内容
     const text = await response.text();
     let rawData: any[];
 
@@ -18,7 +19,7 @@ self.onmessage = async (e: MessageEvent) => {
     try {
       rawData = JSON.parse(text);
     } catch (e) {
-      console.warn(`[Worker] Standard parse failed. Auto-fixing ${category}...`);
+      console.warn(`[Worker] JSON parse failed. Auto-fixing ${category}...`);
       // 修复: 将 "} {" 替换为 "}, {" 以处理缺失的逗号
       let fixedText = text.replace(/}\s*[\r\n]*\s*{/g, '},{');
       // 修复: 如果首尾缺少数组括号

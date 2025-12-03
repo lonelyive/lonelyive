@@ -2,7 +2,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.englishmaster.app',
-  appName: 'English Master',
+  appName: 'Word Master',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

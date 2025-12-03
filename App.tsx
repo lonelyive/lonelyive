@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { SplashScreen } from '@capacitor/splash-screen'; 
+import { StatusBar, Style } from '@capacitor/status-bar'; 
 import Layout from './components/Layout';
 import Home from './views/Home';
 import Quiz from './views/Quiz';
@@ -25,22 +27,22 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        // Start loading vocabularies IMMEDIATELY in the background
-        // We don't await this here because we want the app to open as soon as the splash delay is over.
-        // The vocab loading will continue in the background and update the UI when ready.
-        const vocabLoadTask = autoLoadVocabularies();
+        // Reset Status Bar to default behavior
+        try {
+            await StatusBar.setStyle({ style: Style.Dark });
+            await StatusBar.setOverlaysWebView({ overlay: false }); // Disable overlay
+            await StatusBar.setBackgroundColor({ color: '#333333' }); // Match config
+        } catch (e) {
+            // Ignore on web
+        }
 
-        // Load critical user data
+        const vocabLoadTask = autoLoadVocabularies();
         const userLoadTask = (async () => {
             await checkInStreak();
             return await getUserStats();
         })();
 
-        // Artificial delay for branding splash (1.5 seconds)
-        // This gives the vocab loader a head start of 1.5s
         const splashDelay = new Promise(resolve => setTimeout(resolve, 1500));
-
-        // Wait for User Data AND Splash Delay (but not necessarily all vocabs)
         const [userData] = await Promise.all([userLoadTask, splashDelay]);
         
         setStats(userData);
@@ -59,7 +61,6 @@ const App: React.FC = () => {
       const missingCategories = [];
       const initialStatus: Record<string, VocabStatus> = {};
       
-      // 1. Check DB status
       for (const cat of CATEGORIES) {
           try {
               const count = await getVocabularyCount(cat.id);
@@ -76,21 +77,13 @@ const App: React.FC = () => {
       }
       setVocabStatus(initialStatus);
 
-      // 2. Download & Parse Missing Categories Sequentially
-      // Doing this sequentially ensures we don't freeze the UI thread too much
       for (const cat of missingCategories) {
             console.log(`[App] ⬇️ Auto-loading: ${cat.name}`);
             try {
-                // Ensure clean state
                 await clearVocabularyByCategory(cat.id);
-                
-                const success = await fetchAndParseVocabulary(cat.id, cat.file, (progressCount) => {
-                    // Optional: Update progress in a future UI version
-                });
-                
+                const success = await fetchAndParseVocabulary(cat.id, cat.file, () => {});
                 if (success) {
                     const finalCount = await getVocabularyCount(cat.id);
-                    console.log(`[App] 🎉 Loaded ${cat.name}: ${finalCount}`);
                     setVocabStatus(prev => ({ ...prev, [cat.id]: { count: finalCount, ready: true } }));
                 } else {
                     console.error(`[App] ❌ Failed to load ${cat.name}`);
@@ -107,6 +100,7 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
+      // Removed pt-safe since we are no longer immersive
       <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-blue-600 to-indigo-700 text-white px-6">
         <div className="relative mb-6">
             <div className="absolute inset-0 bg-white/20 rounded-full blur-xl animate-pulse-slow"></div>
@@ -136,7 +130,6 @@ const App: React.FC = () => {
     if (activeTab === AppTab.HOME) {
         if (homeView === 'mistakes') return <Mistakes onBack={() => setHomeView('main')} />;
         if (homeView === 'achievements') return <Achievements onBack={() => setHomeView('main')} />;
-        
         const totalWords = Object.values(counts).reduce((a, b) => a + b, 0);
         return <Home totalWords={totalWords} vocabCounts={counts} onNavigate={setHomeView} />;
     }

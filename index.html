@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>单词大师</title>
+    <title>Word Master</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -38,8 +38,12 @@
         -webkit-user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
+      /* Safe Area Utilities */
       .pb-safe {
           padding-bottom: env(safe-area-inset-bottom);
+      }
+      .pt-safe {
+          padding-top: env(safe-area-inset-top);
       }
       ::-webkit-scrollbar { width: 3px; height: 3px; }
       ::-webkit-scrollbar-track { background: transparent; }
@@ -49,24 +53,25 @@
   <script type="importmap">
 {
   "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
     "vite": "https://aistudiocdn.com/vite@^7.2.6",
     "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
-    "fs": "https://aistudiocdn.com/fs@^0.0.1-security",
-    "url": "https://aistudiocdn.com/url@^0.11.4",
-    "idb": "https://aistudiocdn.com/idb@^8.0.3",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
     "path": "https://aistudiocdn.com/path@^0.12.7",
-    "@capacitor/cli": "https://aistudiocdn.com/@capacitor/cli@^7.4.4"
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "fs": "https://aistudiocdn.com/fs@^0.0.1-security",
+    "idb": "https://aistudiocdn.com/idb@^8.0.3",
+    "@capacitor/cli": "https://aistudiocdn.com/@capacitor/cli@^7.4.4",
+    "@capacitor/status-bar": "https://aistudiocdn.com/@capacitor/status-bar@^7.0.3",
+    "@capacitor/splash-screen": "https://aistudiocdn.com/@capacitor/splash-screen@^7.0.3"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
-    <!-- 关键修改：指向 /src/index.tsx -->
-    <script type="module" src="/src/index.tsx"></script>
+    <script type="module" src="./src/index.tsx"></script>
   </body>
 </html>

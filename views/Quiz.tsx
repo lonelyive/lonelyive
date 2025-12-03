@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { Volume2, CheckCircle, XCircle, ArrowLeft, LayoutGrid, Loader2, ChevronRight, Book, AlertTriangle } from 'lucide-react';
 import { WordItem, VocabularyCategory, CATEGORIES } from '../types';
@@ -28,8 +27,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
   
   const [categoryStats, setCategoryStats] = useState<Record<string, { learned: number, mistake: number }>>({});
 
-  // Reload stats whenever we are in the selection view. 
-  // This ensures that if we deleted a mistake in the other tab, it reflects here immediately upon return.
   useEffect(() => {
       const loadStats = async () => {
           if (!selectedCategory) {
@@ -42,7 +39,7 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
           }
       };
       loadStats();
-  }, [selectedCategory, answered]); // Also reload when an answer changes locally
+  }, [selectedCategory, answered]); 
 
   const generateQuestion = useCallback(async (category: VocabularyCategory) => {
     setLoadingQuestion(true);
@@ -54,7 +51,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
         let target: WordItem | null = null;
         let attempts = 0;
         
-        // 1. Try to find a new (unlearned) word
         while (!target && attempts < 5) {
             const candidates = await getRandomWordsByCategory(category, 5);
             if (candidates.length === 0) break;
@@ -68,7 +64,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
             attempts++;
         }
 
-        // 2. If no new words found, Fallback to Review Mode
         if (!target) {
             const reviewCandidates = await getRandomWordsByCategory(category, 1);
             if (reviewCandidates.length > 0) {
@@ -77,7 +72,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
         }
 
         if (!target) {
-            console.warn("No words found for category:", category);
             setNoWordsFound(true);
             setLoadingQuestion(false);
             return;
@@ -95,7 +89,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
         setAnswered(null);
         setSelectedOption(null);
     } catch (e) {
-        console.error("Quiz Error", e);
         setNoWordsFound(true);
     } finally {
         setLoadingQuestion(false);
@@ -119,14 +112,15 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
 
     if (isCorrect) {
       setAnswered('correct');
-      playAudio(currentWord.wordHead); 
+      // Auto-play word audio on correct answer
+      //playAudio(currentWord.wordHead, false); 
       const newPoints = await updatePoints(10);
       onPointsUpdate(newPoints);
       await saveWordProgress(currentWord, 'learned');
     } else {
       setAnswered('wrong');
       triggerHaptic(50);
-      playAudio(currentWord.wordHead);
+      //playAudio(currentWord.wordHead, false);
       await saveWordProgress(currentWord, 'mistake');
     }
   };
@@ -145,16 +139,11 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
       generateQuestion(selectedCategory);
   };
 
-  const handlePlaySentence = async (e: React.MouseEvent) => {
+  const handleWordAudioClick = (e: React.MouseEvent) => {
       e.stopPropagation();
       triggerHaptic();
-      if (currentWord?.sContent && !isPlayingAudio) {
-          setIsPlayingAudio(true);
-          try {
-            await playAudio(currentWord.sContent);
-          } finally {
-            setIsPlayingAudio(false);
-          }
+      if (currentWord) {
+          playAudio(currentWord.wordHead, false);
       }
   };
 
@@ -169,7 +158,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
       return () => { stopAudio(); };
   }, []);
 
-  // --- Category Selection View ---
   if (!selectedCategory) {
     return (
       <div className="p-4 h-full overflow-y-auto pb-20">
@@ -206,13 +194,11 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
                     <div className="flex flex-col min-w-0">
                         <div className="flex items-center flex-wrap gap-2">
                             <span className="font-bold text-gray-800 text-base">{cat.name}</span>
-                            
                             {isReady ? (
                                 <>
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-600 border border-green-100 whitespace-nowrap">
                                     {stats.learned} 掌握
                                 </span>
-                                {/* Mistake Count Badge - Styled identical to learned badge */}
                                 {stats.mistake > 0 && (
                                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-500 border border-red-100 whitespace-nowrap">
                                         {stats.mistake} 错题
@@ -240,7 +226,6 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
     );
   }
 
-  // --- Error View (Empty DB) ---
   if (noWordsFound) {
       return (
           <div className="flex flex-col items-center justify-center h-full p-6 text-center">
@@ -248,36 +233,27 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
                   <AlertTriangle size={48} className="text-amber-500" />
               </div>
               <h3 className="text-lg font-bold text-gray-800 mb-2">词库数据为空</h3>
-              <p className="text-gray-500 text-sm mb-6">
-                  未能找到该分类的单词数据。请尝试在设置中重置应用，或检查网络连接后重启。
-              </p>
-              <button 
-                  onClick={handleBack}
-                  className="px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-lg active:scale-95 transition-transform"
-              >
-                  返回 (Back)
-              </button>
+              <button onClick={handleBack} className="px-6 py-2 bg-gray-100 text-gray-700 font-bold rounded-lg">返回</button>
           </div>
       );
   }
 
-  // --- Loading View ---
   if (loadingQuestion || !currentWord) {
       return (
           <div className="flex flex-col items-center justify-center h-full">
               <Loader2 size={32} className="animate-spin text-blue-500 mb-2" />
-              <p className="text-xs text-gray-400">Loading Question...</p>
           </div>
       );
   }
 
-  // --- Quiz Main UI ---
+  // --- Main Quiz UI (Compact Mode) ---
   return (
     <div className="flex flex-col h-full bg-gray-50 overflow-hidden relative">
-       <div className="px-4 py-2 bg-white flex items-center border-b border-gray-100 flex-none z-10 h-12">
+       {/* Top Header */}
+       <div className="px-4 py-2 bg-white flex items-center border-b border-gray-100 flex-none h-12 z-10 shadow-sm">
            <button 
                 onClick={handleBack} 
-                className="p-1 -ml-1 text-gray-600 hover:bg-gray-100 rounded-full transition-colors mr-2 active:scale-90"
+                className="p-1 -ml-1 text-gray-600 hover:bg-gray-100 rounded-full mr-2 active:scale-90"
            >
                <ArrowLeft size={24} />
            </button>
@@ -286,43 +262,43 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
            </span>
        </div>
 
-      <div className="flex-1 flex flex-col items-center p-4 w-full max-w-lg mx-auto overflow-y-auto">
-        <div className="w-full text-center space-y-3 mt-2">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h1 className="text-3xl font-black text-gray-900 break-words tracking-tight mb-2">{currentWord.wordHead}</h1>
+      {/* Content Area - Scrollable with large bottom padding to avoid button overlap */}
+      <div className="flex-1 overflow-y-auto w-full max-w-lg mx-auto p-3 pb-32">
+        
+        {/* Word Card (Compact) */}
+        <div className="w-full text-center space-y-2 mt-1">
+            <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
+                <h1 className="text-2xl font-black text-gray-900 break-words tracking-tight mb-1">{currentWord.wordHead}</h1>
+                {/* Explicit Click Area for Audio */}
                 <button 
-                    className="inline-flex items-center space-x-1 bg-blue-50 px-3 py-1 rounded-full active:bg-blue-100 transition-colors active:scale-95" 
-                    onClick={() => { triggerHaptic(); playAudio(currentWord?.wordHead || ''); }}
+                    className="inline-flex items-center space-x-1 bg-blue-50 px-3 py-2 rounded-full active:bg-blue-100 transition-colors active:scale-95 mt-1" 
+                    onClick={handleWordAudioClick}
                 >
                     <span className="text-blue-600 font-mono text-sm">/{currentWord.usphone}/</span>
-                    <Volume2 size={14} className="text-blue-600" />
+                    <Volume2 size={16} className="text-blue-600 ml-1" />
                 </button>
             </div>
 
+            {/* Sentence Card (Text Only) */}
             {currentWord.sContent && (
-                <div className="bg-white/60 p-4 rounded-xl border border-gray-100/50 w-full text-left">
-                    <div className="flex items-center justify-between">
-                        <p className="text-gray-700 font-medium text-base leading-snug flex-1 mr-2">
+                <div className="bg-white/80 p-3 rounded-xl border border-gray-100 w-full text-left">
+                    <div className="flex items-start justify-between gap-2">
+                        <p className="text-gray-700 font-medium text-sm leading-relaxed flex-1">
                             {cleanText(currentWord.sContent)}
                         </p>
-                        <button 
-                            onClick={handlePlaySentence}
-                            disabled={isPlayingAudio}
-                            className={`text-blue-400 hover:text-blue-600 p-2 flex-shrink-0 bg-blue-50 rounded-full transition-colors ${isPlayingAudio ? 'opacity-50 cursor-not-allowed' : 'active:bg-blue-100 active:scale-90'}`}
-                        >
-                            {isPlayingAudio ? <Loader2 size={20} className="animate-spin" /> : <Volume2 size={20} />}
-                        </button>
+                        {/* Audio Button Removed for Sentences as requested */}
                     </div>
                     <div className={`mt-2 pt-2 border-t border-gray-200 transition-opacity duration-300 ${answered ? 'opacity-100' : 'opacity-0'}`}>
-                        <p className="text-gray-600 text-sm">{currentWord.sCn}</p>
+                        <p className="text-gray-500 text-xs">{currentWord.sCn}</p>
                     </div>
                 </div>
             )}
         </div>
 
-        <div className="w-full space-y-2 mt-6 pb-20">
+        {/* Options List */}
+        <div className="w-full space-y-2 mt-3">
             {options.map((option, idx) => {
-                let btnClass = "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"; 
+                let btnClass = "bg-white border-gray-200 text-gray-700"; 
                 let icon = null;
                 
                 if (answered) {
@@ -342,9 +318,9 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
                         key={idx}
                         disabled={answered !== null}
                         onClick={() => handleAnswer(option)}
-                        className={`w-full p-3 rounded-xl border text-left transition-all shadow-sm flex items-center justify-between active:scale-[0.97] touch-manipulation ${btnClass}`}
+                        className={`w-full px-3 py-2.5 rounded-xl border text-left shadow-sm flex items-center justify-between active:scale-[0.98] transition-all touch-manipulation min-h-[46px] ${btnClass}`}
                     >
-                        <span className="text-sm font-medium line-clamp-1 mr-2">{option}</span>
+                        <span className="text-sm font-medium line-clamp-2 mr-2 leading-snug">{option}</span>
                         {icon}
                     </button>
                 )
@@ -352,13 +328,14 @@ const Quiz: React.FC<QuizProps> = ({ onPointsUpdate, vocabStatus }) => {
         </div>
       </div>
 
-      <div className="flex-none absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-3 z-20 pb-safe">
+      {/* Bottom Button - Fixed */}
+      <div className="flex-none absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur border-t border-gray-200 p-3 z-20 pb-safe">
           <button 
                 onClick={handleNext}
-                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center space-x-2 transition-all active:scale-[0.97] shadow-md
+                className={`w-full py-3 rounded-xl font-bold flex items-center justify-center space-x-2 transition-all shadow-md active:scale-[0.98]
                     ${answered 
                         ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-200' 
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
+                        : 'bg-gray-100 text-gray-400'}`}
           >
               <span>{answered ? 'Next Question' : 'Skip / Show Answer'}</span>
               <ChevronRight size={18} />

@@ -1,14 +1,14 @@
-
 {
-  "name": "english-master",
+  "name": "word-master",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "prebuild": "node scripts/setup-structure.js",
+    "build": "npm run prebuild && vite build",
     "preview": "vite preview",
-    "fix:android": "node scripts/android-fix.js",
+    "fix:android": "node scripts/android-fix.js && node scripts/fix-app-name.js",
     "init:android": "npm run build && npx cap add android && npm run fix:android",
     "cap:sync": "npx cap sync",
     "cap:open": "npx cap open android",
@@ -20,7 +20,8 @@
     "lucide-react": "^0.555.0",
     "idb": "^8.0.3",
     "@capacitor/core": "^6.0.0",
-    "@capacitor/android": "^6.0.0"
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0" 
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

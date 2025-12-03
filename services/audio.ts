@@ -1,31 +1,27 @@
-
 // Cleanup helper to remove HTML tags and extra symbols before playback
 export const cleanText = (text: string): string => {
   if (!text) return '';
   return text
-    .replace(/<[^>]*>/g, '') // Remove HTML tags like <b>...</b>
+    .replace(/<[^>]*>/g, '') 
     .replace(/&nbsp;/g, ' ')
-    .replace(/\r?\n|\r/g, ' ') // Remove newlines
-    .replace(/\s+/g, ' ') // Collapse whitespace
-    .replace(/^["']|["']$/g, '') // Remove start/end quotes
+    .replace(/\r?\n|\r/g, ' ') 
+    .replace(/\s+/g, ' ') 
+    .replace(/^["']|["']$/g, '') 
     .trim();
 };
 
 export const getAudioUrl = (text: string): string => {
   const safeText = cleanText(text);
   if (!safeText) return '';
-  // Use Youdao Dictionary Voice API
-  // type=2 specifies US English
-  // audio arg must be encoded
-  // le=en ensures English engine is used
+  // Use HTTPS to prevent Mixed Content errors on Android
   return `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(safeText)}&type=2&le=en`;
 };
 
-// Singleton Audio Manager to prevent garbage collection issues
+// Singleton Audio Manager
 class AudioManager {
   private currentAudio: HTMLAudioElement | null = null;
 
-  play(text: string): Promise<void> {
+  play(text: string, forceTTS: boolean = false): Promise<void> {
     return new Promise((resolve, reject) => {
       const safeText = cleanText(text);
       if (!safeText) {
@@ -33,30 +29,38 @@ class AudioManager {
         return;
       }
 
-      // Stop previous audio if playing
       this.stop();
+
+      // Mobile Optimization:
+      // Long sentences (likely example sentences) are better handled by TTS 
+      // because network audio might timeout or not exist for custom sentences.
+      if (forceTTS || safeText.length > 50) {
+          this.playTTS(safeText).then(resolve).catch(resolve); // Resolve even on error to not block UI
+          return;
+      }
 
       const url = getAudioUrl(safeText);
       const audio = new Audio(url);
       this.currentAudio = audio;
 
-      // 1. Try Network Audio (Real Human Voice)
       audio.onended = () => {
         this.currentAudio = null;
         resolve();
       };
 
       audio.onerror = () => {
-        // 2. Fallback to Browser TTS (Guarantee playback)
         console.warn("Network audio failed, switching to fallback TTS");
-        this.playFallback(safeText).then(resolve).catch(reject);
+        this.playTTS(safeText).then(resolve).catch(resolve);
       };
 
-      audio.play().catch(e => {
-        console.warn("Audio play error:", e);
-        // If play() fails (e.g. interaction policy), try fallback
-        this.playFallback(safeText).then(resolve).catch(reject);
-      });
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+          playPromise.catch(e => {
+            console.warn("Audio play blocked or failed:", e);
+            // Fallback to TTS if network audio is blocked (common in mobile browsers without user interaction)
+            this.playTTS(safeText).then(resolve).catch(resolve);
+          });
+      }
     });
   }
 
@@ -71,37 +75,50 @@ class AudioManager {
     }
   }
 
-  private playFallback(text: string): Promise<void> {
+  private playTTS(text: string): Promise<void> {
     return new Promise((resolve) => {
       if (!('speechSynthesis' in window)) {
+        console.warn("TTS not supported on this device");
         resolve();
         return;
       }
       
-      // Cancel any ongoing speech
+      // Android WebView quirk: sometimes cancel() needs a tick to process
       window.speechSynthesis.cancel();
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-US'; // Default to US English
-      utterance.rate = 0.9; // Slightly slower for clarity
+      setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance(text);
+          
+          // Robust Voice Selection
+          const voices = window.speechSynthesis.getVoices();
+          const enVoice = voices.find(v => v.lang === 'en-US') || 
+                          voices.find(v => v.lang.startsWith('en')) ||
+                          null; // Fallback to default if no English voice found
+          
+          if (enVoice) {
+              utterance.voice = enVoice;
+          }
+          
+          // Ensure lang is set even if voice obj is null
+          utterance.lang = 'en-US'; 
+          utterance.rate = 0.9; // Slightly slower for better clarity on mobile
 
-      utterance.onend = () => {
-        resolve();
-      };
-      
-      utterance.onerror = () => {
-        resolve(); // Resolve anyway to unblock UI
-      };
+          utterance.onend = () => resolve();
+          utterance.onerror = (e) => {
+              console.error("TTS Error:", e);
+              resolve();
+          };
 
-      window.speechSynthesis.speak(utterance);
+          window.speechSynthesis.speak(utterance);
+      }, 10);
     });
   }
 }
 
 const audioManager = new AudioManager();
 
-export const playAudio = (text: string): Promise<void> => {
-  return audioManager.play(text);
+export const playAudio = (text: string, forceTTS: boolean = false): Promise<void> => {
+  return audioManager.play(text, forceTTS);
 };
 
 export const stopAudio = (): void => {
